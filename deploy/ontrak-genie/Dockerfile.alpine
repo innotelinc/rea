@@ -1,0 +1,39 @@
+# The REA layer for an Alpine container, in the order that works.
+#
+# Copy these lines into the runtime stage of an image that needs REA. They are
+# pinned on purpose: a provider update that changes its version check should be a
+# deliberate change here, not a surprise on the next deploy.
+FROM node:22-alpine
+
+# procps: `ps -axo` for REA's process-ownership check (busybox ps lacks -axo).
+# openjdk21-jdk: a *full* JDK, not the headless runtime — REA asks for it by name.
+# gcompat + libstdc++: Ghidra's native decompiler is glibc-linked; without these the
+#   import "succeeds" and every decompile fails with a missing-file error.
+RUN apk add --no-cache procps openjdk21-jdk gcompat libstdc++ curl unzip
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+
+ARG REA_AGENTS_VERSION=6.7.0
+RUN npm install -g --no-fund --no-audit "rea-agents@${REA_AGENTS_VERSION}" \
+ && mkdir -p /root/.agents \
+ && printf '%s\n' '{ "mcpServers": { "rea": { "command": "rea", "args": ["--mcp"] } } }' \
+      > /root/.agents/mcp.json \
+ && rea --version
+
+ARG GHIDRA_VERSION=12.1.4
+ARG GHIDRA_BUILD=20260921
+RUN curl -fsSL -o /tmp/ghidra.zip \
+      "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_BUILD}.zip" \
+ && unzip -q /tmp/ghidra.zip -d /opt \
+ && rm -f /tmp/ghidra.zip \
+ && ln -s "/opt/ghidra_${GHIDRA_VERSION}_PUBLIC" /opt/ghidra
+ENV GHIDRA_INSTALL_DIR=/opt/ghidra
+
+# Optional: the Python ELF-layout provider. Unicorn ships no musl wheel, so this
+# builds from source and takes a while — which is why it is a separate stage.
+# ARG UNICORN=2.1.2
+# RUN python3 -m venv /opt/rea-python \
+#  && apk add --no-cache cmake ninja \
+#  && /opt/rea-python/bin/pip install --no-cache-dir \
+#       "pwntools==4.15.0" "pyelftools==0.33" "unicorn==${UNICORN}" \
+#  && /opt/rea-python/bin/python -c "import pwn, elftools, unicorn"
+# ENV REA_PWNTOOLS_PYTHON=/opt/rea-python/bin/python
